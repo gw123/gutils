@@ -14,7 +14,7 @@ import (
 type KafkaConsumer interface {
 	GetTopic() string
 	Start(ctx context.Context) error
-	End() error
+	Close() error
 }
 
 type ConsumerConfig struct {
@@ -32,6 +32,8 @@ type Consumer struct {
 	log             common.Logger
 	limit           int // todo 消息限流
 	toCommitMessage chan kafkago.Message
+	runFlag         bool
+	closeWg         sync.WaitGroup
 }
 
 func NewConsumer(config ConsumerConfig) KafkaConsumer {
@@ -52,6 +54,7 @@ func NewConsumer(config ConsumerConfig) KafkaConsumer {
 		handleMassage:   config.HandleMassage,
 		log:             config.Log,
 		toCommitMessage: make(chan kafkago.Message, 500),
+		runFlag:         true,
 	}
 }
 
@@ -64,7 +67,7 @@ func (n *Consumer) AutoCommitLoop(ctx context.Context) {
 	var toCommitMessageBatch []kafkago.Message
 	var timer = time.NewTimer(time.Second)
 	var lock sync.RWMutex
-	for {
+	for n.runFlag {
 		select {
 		case msg := <-n.toCommitMessage:
 			lock.RLock()
@@ -99,6 +102,13 @@ func (n *Consumer) AutoCommitLoop(ctx context.Context) {
 
 		}
 	}
+	n.closeWg.Add(1)
+	if len(toCommitMessageBatch) > 0 {
+		if err := n.reader.CommitMessages(ctx, toCommitMessageBatch...); err != nil {
+			n.log.Errorf("Consumer CommitMessages err %s", err)
+		}
+	}
+	n.closeWg.Done()
 	return
 }
 
@@ -133,6 +143,8 @@ func (n *Consumer) Start(ctx context.Context) error {
 	}
 }
 
-func (n *Consumer) End() error {
+func (n *Consumer) Close() error {
+	n.runFlag = false
+	n.closeWg.Wait()
 	return n.reader.Close()
 }

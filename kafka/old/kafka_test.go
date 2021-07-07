@@ -3,11 +3,12 @@ package old
 import (
 	"context"
 	"fmt"
-	"github.com/Shopify/sarama"
-	"github.com/gw123/glog"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Shopify/sarama"
+	"github.com/gw123/glog"
 )
 
 type ConsumerGroupHandler struct {
@@ -38,7 +39,7 @@ func (c ConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, 
 	return nil
 }
 
-const TopicLog = "boss-log"
+const TopicLog = "boss-log3"
 
 func TestInitConsume(t *testing.T) {
 	ctx := context.Background()

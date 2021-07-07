@@ -14,7 +14,7 @@ func TestNormalTopicManager(t *testing.T) {
 	manager := NewConsumer(ConsumerConfig{
 		Brokers: []string{"127.0.0.1:3831", "127.0.0.1:3832", "127.0.0.1:3833"},
 		GroupID: "log",
-		Topic:   "boss-log",
+		Topic:   "boss-log10p",
 		HandleMassage: func(m *kafkago.Message) error {
 			atomic.AddInt32(&count, 1)
 			if m.Offset%1000 == 0 {
