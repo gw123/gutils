@@ -71,16 +71,18 @@ func (p *YamlParser) Parse(configContent interface{}) (map[string]interface{}, e
 	return result, nil
 }
 
-const ENV_DEFAULT_APOLLO_PREFIX = "APOLLO_DEFAULT_"
+const ENV_DEFAULT_APOLLO_PREFIX = "APOLLO_"
 
-func InitApolloFromDefaultEnv() {
+func InitApolloFromDefaultEnv(appName string) {
+	appName = strings.ToUpper(appName)
+	prefix := ENV_DEFAULT_APOLLO_PREFIX + appName + "_"
 	viper.AutomaticEnv()
-	namespace := viper.GetString(ENV_DEFAULT_APOLLO_PREFIX + "NAMESPACE")
-	appId := viper.GetString(ENV_DEFAULT_APOLLO_PREFIX + "APPID")
-	secret := viper.GetString(ENV_DEFAULT_APOLLO_PREFIX + "SECRET")
-	ip := viper.GetString(ENV_DEFAULT_APOLLO_PREFIX + "IP")
-	isBackup := viper.GetBool(ENV_DEFAULT_APOLLO_PREFIX + "IS_BACKUP_CONFIG`")
-	backupPath := viper.GetString(ENV_DEFAULT_APOLLO_PREFIX + "BACKUP_CONFIG_PATH")
+	namespace := viper.GetString(prefix + "NAMESPACE")
+	appId := viper.GetString(prefix + "APPID")
+	secret := viper.GetString(prefix + "SECRET")
+	ip := viper.GetString(prefix + "IP")
+	isBackup := viper.GetBool(prefix + "IS_BACKUP_CONFIG`")
+	backupPath := viper.GetString(prefix + "BACKUP_CONFIG_PATH")
 	//DOCKER_VOLUME_ROOT
 	c := &config.AppConfig{
 		AppID:            appId,
@@ -92,7 +94,7 @@ func InitApolloFromDefaultEnv() {
 		BackupConfigPath: backupPath,
 	}
 
-	glog.Infof("InitApolloFromDefaultEnv default config %+v", c)
+	glog.DefaultLogger().Infof("InitApolloFromDefaultEnv default config %+v", c)
 
 	NewGApollo(c)
 }

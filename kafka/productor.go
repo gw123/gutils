@@ -2,14 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"sync"
 	"time"
+
+	"github.com/segmentio/kafka-go/sasl"
+
+	"github.com/segmentio/kafka-go/sasl/plain"
 
 	"github.com/gw123/glog"
 	"github.com/gw123/glog/common"
 	"github.com/pkg/errors"
 	kafkago "github.com/segmentio/kafka-go"
+	"github.com/segmentio/kafka-go/sasl/scram"
 )
 
 type KafkaProducer interface {
@@ -18,12 +24,32 @@ type KafkaProducer interface {
 	Send(ctx context.Context, msg ...kafkago.Message) error
 	SendMsg(ctx context.Context, msg interface{}) error
 	SendMsgWithHeader(ctx context.Context, header map[string]string, msg interface{}) error
+	SendAsync(ctx context.Context, msgs ...kafkago.Message) error
 }
 
 type ProducerConfig struct {
 	Brokers []string `json:"brokers"`
 	Topic   string   `json:"topic"`
 	Log     common.Logger
+	/***
+	&kafkago.LeastBytes{}
+	&kafkago.Hash{}
+	&kafkago.RoundRobin{}
+	&kafkago.CRC32Balancer{}
+	&kafkago.Murmur2Balancer{}
+	*/
+	Balancer kafkago.Balancer
+	/**
+	Gzip   Compression = compress.Gzip
+	Snappy Compression = compress.Snappy
+	Lz4    Compression = compress.Lz4
+	Zstd   Compression = compress.Zstd
+	*/
+	Compression kafkago.Compression
+	Username    string
+	Password    string
+	SASLType    string
+	TLS         *tls.Config
 }
 
 type ProducerManager struct {
@@ -40,15 +66,48 @@ func NewProducerManager(config ProducerConfig) KafkaProducer {
 		config.Log = glog.DefaultLogger()
 	}
 
+	if config.Balancer == nil {
+		config.Balancer = &kafkago.LeastBytes{}
+	}
+
+	var mechanism sasl.Mechanism
+	var err error
+	if config.Username != "" {
+		switch config.SASLType {
+		case "sha512":
+			mechanism, err = scram.Mechanism(scram.SHA512, config.Username, config.Password)
+			if err != nil {
+				config.Log.Errorf("scram.Mechanism %v", err)
+			}
+		case "sha256":
+			mechanism, err = scram.Mechanism(scram.SHA256, config.Username, config.Password)
+			if err != nil {
+				config.Log.Errorf("scram.Mechanism %v", err)
+			}
+		case "plain":
+			mechanism = plain.Mechanism{
+				Username: config.Username,
+				Password: config.Password,
+			}
+		}
+	}
+
+	transport := &kafkago.Transport{
+		SASL: mechanism,
+		TLS:  config.TLS,
+	}
+
 	write := &kafkago.Writer{
 		Addr:        kafkago.TCP(config.Brokers...),
 		Topic:       config.Topic,
-		Balancer:    &kafkago.LeastBytes{},
+		Balancer:    config.Balancer,
 		BatchBytes:  10e3, // 10KB
 		BatchSize:   100,
 		Logger:      config.Log,
 		ErrorLogger: config.Log,
 		//Compression: kafkago.Compression(kafkago.Gzip),
+		Compression: config.Compression,
+		Transport:   transport,
 	}
 
 	p := &ProducerManager{
@@ -69,6 +128,13 @@ func (n *ProducerManager) GetTopic() string {
 func (n *ProducerManager) Send(ctx context.Context, msgs ...kafkago.Message) error {
 	if err := n.write.WriteMessages(ctx, msgs...); err != nil {
 		return errors.Wrap(err, "WriteMessages")
+	}
+	return nil
+}
+
+func (n *ProducerManager) SendAsync(ctx context.Context, msgs ...kafkago.Message) error {
+	for _, msg := range msgs {
+		n.toCommitMessage <- msg
 	}
 	return nil
 }

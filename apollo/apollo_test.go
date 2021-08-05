@@ -9,11 +9,10 @@ import (
 	"github.com/zouyx/agollo/v4/env/config"
 )
 
-const APP_APOLLO_PREFIX = "APOLLO_EMAIL_"
-
 func TestNewGApollo(t *testing.T) {
 	viper.AutomaticEnv()
 
+	const APP_APOLLO_PREFIX = "APOLLO_EMAIL_"
 	namespace := viper.GetString(APP_APOLLO_PREFIX + "NAMESPACE")
 	appId := viper.GetString(APP_APOLLO_PREFIX + "APPID")
 	secret := viper.GetString(APP_APOLLO_PREFIX + "SECRET")
@@ -41,7 +40,7 @@ func TestNewGApollo(t *testing.T) {
 }
 
 func TestInitApolloFromDefaultEnv(t *testing.T) {
-	InitApolloFromDefaultEnv()
+	InitApolloFromDefaultEnv("default")
 	for {
 		time.Sleep(time.Second * 5)
 		t.Log("point", viper.Get("point"))

@@ -86,3 +86,67 @@ func TestProducerManagerV2(t *testing.T) {
 	producer.Close()
 	glog.Infof("cast %d ms", time.Now().Sub(start)/time.Millisecond)
 }
+
+func TestProducerManagerV3(t *testing.T) {
+	producer := NewProducerManager(ProducerConfig{
+		Brokers:  []string{"127.0.0.1:3831", "127.0.0.1:3832", "127.0.0.1:3833"},
+		Topic:    TopicLog,
+		Balancer: &kafkago.CRC32Balancer{},
+	})
+
+	//var batchMsg []kafkago.Message
+	var ctx = context.Background()
+	start := time.Now()
+
+	for i := 0; i < 1000000; i++ {
+		timeStr := time.Now().Format("2006 01-02 15-04-05")
+		data := fmt.Sprintf("index[%d] date[%s]", i, timeStr)
+
+		//batchMsg = append(batchMsg, kafkago.Message{Value: []byte(data)})
+		//err := producer.Send(ctx, batchMsg...)
+		err := producer.SendAsync(ctx, kafkago.Message{
+			Key:   []byte("123"),
+			Value: []byte(data),
+		})
+
+		if err != nil {
+			glog.DefaultLogger().Errorf("[%d] send msg err %v", err)
+			continue
+		}
+		//	batchMsg = batchMsg[:0]
+		//glog.DefaultLogger().Infof("send msg over partition %d, offset %d", partition , offset)
+		//time.Sleep(time.Millisecond)
+	}
+	producer.Close()
+	glog.Infof("cast %d ms", time.Now().Sub(start)/time.Millisecond)
+}
+
+func TestProducerManagerDev(t *testing.T) {
+	producer := NewProducerManager(ProducerConfig{
+		Brokers: []string{"kafka-1.neibu.koolearn.com:10193", "kafka-2.neibu.koolearn.com:10193", "kafka-3.neibu.koolearn.com:10193"},
+		Topic:   "eccp-signal-for-ai",
+	})
+
+	//var batchMsg []kafkago.Message
+	var ctx = context.Background()
+	start := time.Now()
+
+	for i := 0; i < 1000000; i++ {
+		timeStr := time.Now().Format("2006 01-02 15-04-05")
+		data := fmt.Sprintf("index[%d] date[%s]", i, timeStr)
+
+		//batchMsg = append(batchMsg, kafkago.Message{Value: []byte(data)})
+		//err := producer.Send(ctx, batchMsg...)
+		err := producer.SendMsg(ctx, data)
+
+		if err != nil {
+			glog.DefaultLogger().Errorf("[%d] send msg err %v", err)
+			continue
+		}
+		//	batchMsg = batchMsg[:0]
+		//glog.DefaultLogger().Infof("send msg over partition %d, offset %d", partition , offset)
+		//time.Sleep(time.Millisecond)
+	}
+	producer.Close()
+	glog.Infof("cast %d ms", time.Now().Sub(start)/time.Millisecond)
+}
