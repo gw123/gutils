@@ -16,6 +16,7 @@ import (
 )
 
 func NewGApollo(c *config.AppConfig) error {
+	agollo.SetLogger(glog.DefaultLogger())
 	client, err := agollo.StartWithConfig(func() (*config.AppConfig, error) {
 		return c, nil
 	})
@@ -23,29 +24,39 @@ func NewGApollo(c *config.AppConfig) error {
 	if err != nil {
 		return errors.Wrap(err, "NewGApollo")
 	}
-
-	agollo.SetLogger(glog.DefaultLogger())
 	listener := &CustomChangeListener{}
 	client.AddChangeListener(listener)
+	listener.Wait()
 	return nil
 }
 
 type CustomChangeListener struct {
-	wg sync.WaitGroup
+	wg   sync.WaitGroup
+	once sync.Once
+}
+
+func (c *CustomChangeListener) Wait() {
+	c.wg.Add(1)
+	c.wg.Wait()
 }
 
 func (c *CustomChangeListener) OnChange(changeEvent *storage.ChangeEvent) {
 	for key, value := range changeEvent.Changes {
 		viper.Set(key, value)
-		glog.Infof("change key : %s ,old value %v, new value %v\n ", key, value.OldValue, value.NewValue)
 	}
+
+	c.once.Do(func() {
+		c.wg.Done()
+	})
 }
 
 func (c *CustomChangeListener) OnNewestChange(event *storage.FullChangeEvent) {
 	for key, value := range event.Changes {
 		viper.Set(key, value)
-		glog.Infof("apollo change key : %s ,value %v\n ", key, value)
 	}
+	c.once.Do(func() {
+		c.wg.Done()
+	})
 }
 
 type YamlParser struct{}
@@ -83,7 +94,7 @@ func InitApolloFromDefaultEnv(appName string) {
 	ip := viper.GetString(prefix + "IP")
 	isBackup := viper.GetBool(prefix + "IS_BACKUP_CONFIG`")
 	backupPath := viper.GetString(prefix + "BACKUP_CONFIG_PATH")
-	//DOCKER_VOLUME_ROOT
+
 	c := &config.AppConfig{
 		AppID:            appId,
 		Cluster:          "default",
