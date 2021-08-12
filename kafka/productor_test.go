@@ -123,15 +123,15 @@ func TestProducerManagerV3(t *testing.T) {
 
 func TestProducerManagerDev(t *testing.T) {
 	producer := NewProducerManager(ProducerConfig{
-		Brokers: []string{"kafka-1.neibu.koolearn.com:10193", "kafka-2.neibu.koolearn.com:10193", "kafka-3.neibu.koolearn.com:10193"},
-		Topic:   "eccp-signal-for-ai",
+		Brokers: []string{"127.0.0.1:3831", "127.0.0.1:3832", "127.0.0.1:3833"},
+		Topic:   "test_offset",
 	})
 
 	//var batchMsg []kafkago.Message
 	var ctx = context.Background()
 	start := time.Now()
 
-	for i := 0; i < 1000000; i++ {
+	for i := 0; i < 100000; i++ {
 		timeStr := time.Now().Format("2006 01-02 15-04-05")
 		data := fmt.Sprintf("index[%d] date[%s]", i, timeStr)
 

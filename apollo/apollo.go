@@ -1,8 +1,10 @@
 package apollo
 
 import (
+	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zouyx/agollo/v4/constant"
 	"github.com/zouyx/agollo/v4/extension"
@@ -15,54 +17,111 @@ import (
 	"github.com/zouyx/agollo/v4/storage"
 )
 
-func NewGApollo(c *config.AppConfig) error {
-	agollo.SetLogger(glog.DefaultLogger())
-	client, err := agollo.StartWithConfig(func() (*config.AppConfig, error) {
-		return c, nil
-	})
-	extension.AddFormatParser(constant.YAML, &YamlParser{})
-	if err != nil {
-		return errors.Wrap(err, "NewGApollo")
+type UnmarshalFunc func(viper *viper.Viper)
+type ConfigChange func(key string, newVal, oldVal interface{})
+
+//Config 配置文件
+type Config struct {
+	AppID             string `json:"appId"`
+	Cluster           string `json:"cluster"`
+	NamespaceName     string `json:"namespaceName"`
+	IP                string `json:"ip"`
+	IsBackupConfig    bool   `default:"true" json:"isBackupConfig"`
+	BackupConfigPath  string `json:"backupConfigPath"`
+	Secret            string `json:"secret"`
+	SyncServerTimeout int    `json:"syncServerTimeout"`
+	Timeout           time.Duration
+	UnmarshalFunc     UnmarshalFunc
+	ConfigChange      ConfigChange
+}
+
+func NewGApollo(c *Config) (*agollo.Client, error) {
+	if c.Timeout == 0 {
+		c.Timeout = time.Second * 12
 	}
-	listener := &CustomChangeListener{}
+
+	client, err := agollo.StartWithConfig(func() (*config.AppConfig, error) {
+		cfg := config.AppConfig{
+			AppID:             c.AppID,
+			Cluster:           c.Cluster,
+			NamespaceName:     c.NamespaceName,
+			IP:                c.IP,
+			IsBackupConfig:    c.IsBackupConfig,
+			BackupConfigPath:  c.BackupConfigPath,
+			Secret:            c.Secret,
+			SyncServerTimeout: c.SyncServerTimeout,
+		}
+		return &cfg, nil
+	})
+
+	if err != nil {
+		return nil, errors.Wrap(err, "NewGApollo")
+	}
+
+	extension.AddFormatParser(constant.YAML, &YamlParser{
+		UnmarshalFunc: c.UnmarshalFunc,
+	})
+
+	listener := NewCustomChangeListener(c.ConfigChange)
 	client.AddChangeListener(listener)
-	listener.Wait()
-	return nil
+
+	agollo.SetLogger(glog.DefaultLogger())
+	ctx := context.Background()
+	ctx, _ = context.WithTimeout(ctx, c.Timeout)
+	if err := listener.Wait(ctx); err != nil {
+		return nil, err
+	}
+	glog.DefaultLogger().Info("init apollo config success")
+	return client, nil
 }
 
 type CustomChangeListener struct {
-	wg   sync.WaitGroup
-	once sync.Once
+	wg           chan struct{}
+	once         sync.Once
+	ConfigChange ConfigChange
 }
 
-func (c *CustomChangeListener) Wait() {
-	c.wg.Add(1)
-	c.wg.Wait()
+func NewCustomChangeListener(change ConfigChange) *CustomChangeListener {
+	return &CustomChangeListener{
+		wg:           make(chan struct{}, 1),
+		once:         sync.Once{},
+		ConfigChange: change,
+	}
+}
+
+func (c *CustomChangeListener) Wait(ctx context.Context) error {
+	select {
+	case <-c.wg:
+		return nil
+	case <-ctx.Done():
+		return errors.New("wait config init timeout")
+	}
 }
 
 func (c *CustomChangeListener) OnChange(changeEvent *storage.ChangeEvent) {
 	for key, value := range changeEvent.Changes {
-		viper.Set(key, value)
+		//glog.DefaultLogger().Infof("onchange key %s val %+v", key, value)
+		if c.ConfigChange != nil {
+			c.ConfigChange(key, value.NewValue, value.OldValue)
+		}
 	}
-
-	c.once.Do(func() {
-		c.wg.Done()
-	})
 }
 
 func (c *CustomChangeListener) OnNewestChange(event *storage.FullChangeEvent) {
-	for key, value := range event.Changes {
-		viper.Set(key, value)
-	}
+	//for key, value := range event.Changes {
+	//	glog.DefaultLogger().Infof("OnNewestChange key:%s \t,val:%+v", key, value)
+	//}
 	c.once.Do(func() {
-		c.wg.Done()
+		c.wg <- struct{}{}
 	})
 }
 
-type YamlParser struct{}
+type YamlParser struct {
+	UnmarshalFunc UnmarshalFunc
+}
 
 func (p *YamlParser) Parse(configContent interface{}) (map[string]interface{}, error) {
-	tmpViper := viper.New()
+	tmpViper := viper.GetViper()
 	tmpViper.SetConfigType("yaml")
 	content, ok := configContent.(string)
 	if !ok {
@@ -74,6 +133,11 @@ func (p *YamlParser) Parse(configContent interface{}) (map[string]interface{}, e
 	if err != nil {
 		return nil, errors.Wrap(err, "viper.ReadConfig")
 	}
+
+	if p.UnmarshalFunc != nil {
+		p.UnmarshalFunc(tmpViper)
+	}
+
 	result := make(map[string]interface{})
 	keys := tmpViper.AllKeys()
 	for _, key := range keys {
@@ -84,7 +148,7 @@ func (p *YamlParser) Parse(configContent interface{}) (map[string]interface{}, e
 
 const ENV_DEFAULT_APOLLO_PREFIX = "APOLLO_"
 
-func InitApolloFromDefaultEnv(appName string) {
+func InitApolloFromDefaultEnv(appName string, unmarshalFunc UnmarshalFunc, configChange ConfigChange) (*agollo.Client, error) {
 	appName = strings.ToUpper(appName)
 	prefix := ENV_DEFAULT_APOLLO_PREFIX + appName + "_"
 	viper.AutomaticEnv()
@@ -95,7 +159,7 @@ func InitApolloFromDefaultEnv(appName string) {
 	isBackup := viper.GetBool(prefix + "IS_BACKUP_CONFIG`")
 	backupPath := viper.GetString(prefix + "BACKUP_CONFIG_PATH")
 
-	c := &config.AppConfig{
+	c := &Config{
 		AppID:            appId,
 		Cluster:          "default",
 		IP:               ip,
@@ -103,9 +167,11 @@ func InitApolloFromDefaultEnv(appName string) {
 		Secret:           secret,
 		IsBackupConfig:   isBackup,
 		BackupConfigPath: backupPath,
+		UnmarshalFunc:    unmarshalFunc,
+		ConfigChange:     configChange,
 	}
 
 	glog.DefaultLogger().Infof("InitApolloFromDefaultEnv default config %+v", c)
 
-	NewGApollo(c)
+	return NewGApollo(c)
 }

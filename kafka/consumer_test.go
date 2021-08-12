@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/gw123/glog"
+
 	kafkago "github.com/segmentio/kafka-go"
 )
 
@@ -55,4 +57,30 @@ func TestNormalTopicManagerDev(t *testing.T) {
 	if err := manager.Start(context.Background()); err != nil {
 		panic(err)
 	}
+}
+
+func TestConsumerOffsetManager(t *testing.T) {
+	reader := kafkago.NewReader(kafkago.ReaderConfig{
+		Brokers:       []string{"127.0.0.1:3831", "127.0.0.1:3832", "127.0.0.1:3833"},
+		GroupID:       "c1",
+		Topic:         "test_offset",
+		MinBytes:      1,
+		MaxBytes:      1000,
+		QueueCapacity: 1,
+	})
+
+	ctx := context.Background()
+
+	glog.DefaultLogger().Infof("reader offset %d", reader.Stats().Offset)
+	m1, err := reader.FetchMessage(ctx)
+	glog.DefaultLogger().Infof("m1 offset %d", m1.Offset, string(m1.Value), err)
+
+	m2, err := reader.FetchMessage(ctx)
+	glog.DefaultLogger().Infof("m2 offset %d", m2.Offset, string(m1.Value), err)
+	reader.CommitMessages(ctx, m2)
+
+	m3, err := reader.FetchMessage(ctx)
+	glog.DefaultLogger().Infof("m3 offset %d", m3.Offset, string(m1.Value), err)
+
+	glog.DefaultLogger().Infof("reader offset %d", reader.Stats().Offset)
 }
